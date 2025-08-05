@@ -1,0 +1,110 @@
+---
+output:
+  pdf_document: default
+  html_document:
+    theme: yeti
+params:
+  threads: 20
+  rdata: ''
+  token: ''
+  ref: ''
+  out: ''
+---
+
+# Multiomic data analysis in ArchR
+
+## Importing data and setting up a Multiome project
+
+
+Lets start by loading ArchR and setting up our genome (`hg39` in this case), our threads (which are system dependent so you should change that based on your computational resources), and our random seed.
+
+```{r}
+library(ArchR)
+addArchRGenome("hg38")
+addArchRThreads(21)
+set.seed(824)
+```
+
+We can download the files associated with the multiome tutorial just like we did for the main tutorial but using `tutorial = "Multiome"`.
+
+```{r, collapse=TRUE}
+data.dir <- "/gstore/scratch/u/lucast3/fibroticmemory/data"
+samples <- c("SAM24426807","SAM24426808","SAM24426809","SAM24426810",
+             "SAM24426811","SAM24426812","SAM24426813","SAM24426814")
+atacFiles <- file.path(data.dir,samples,"croo_output","atac_fragments.tsv.gz")
+rnaFiles <- file.path(data.dir,samples,"croo_output","filtered_feature_bc_matrix.h5")
+names(atacFiles) <- samples
+names(rnaFiles) <- samples
+```
+
+You can see that the names in these vectors match which is what will be used to link the files together upon import.
+
+```{r, collapse=TRUE}
+names(atacFiles)
+names(rnaFiles)
+all.equal(names(atacFiles), names(rnaFiles))
+```
+
+# Create Arrow
+
+```{r message=TRUE, warning=TRUE, collapse=TRUE}
+ArrowFiles <- createArrowFiles(
+  inputFiles = atacFiles,
+  sampleNames = names(atacFiles),
+  filterTSS = 3,
+  filterFrags = 1000,
+  addTileMat = TRUE,
+  addGeneScoreMat = TRUE
+)
+```
+
+# Create ArchR
+Then we create an `ArchRProject` object from those ArrowFiles
+```{r, collapse=TRUE}
+projMulti1 <- ArchRProject(
+  ArrowFiles = ArrowFiles,
+  outputDirectory = "/gstore/scratch/u/lucast3/fibroticmemory/ArchROutput")
+```
+
+Now that we've handled the scATAC-seq data, we turn out attention to the scRNA-seq data. ArchR provides the `import10xFeatureMatrix()` function which will perform this automatically for all of the `filtered_feature_bc_matrix.h5` files in your data set. While this process may seem straightforward, there are a few things going on under-the-hood which are important to understand. First, the `filtered_feature_bc_matrix.h5` created by `cellranger-arc` are not always perfectly matched across samples. For example, ArchR will throw an error if your various scRNA-seq input files do not match based on the gene names or the metadata columns because we view this as an unforseen incompatibility between data, potentially caused by alignment to different reference genomes or something similar. There are also more permissible mismatches that occur across these input files. Relatively frequently, the transcript-level data that is associated with each gene can vary slightly across samples for reasons that aren't completely clear. For more information, see [this post](https://github.com/GreenleafLab/ArchR/issues/507#issuecomment-1063139673). Because of this, you have to decide what to do when these minor conflicts arise. We provide two options which are controlled by the `strictMatch` parameter. If you want to try to keep the genes with mis-matched metadata information, set `strictMatch = FALSE` which will coerce all samples to match the metadata information of the first sample from your `input`. Alternatively, if you would prefer to remove genes whose metadata is mis-matched across samples, you can set `strictMatch = TRUE` which will remove the offending genes from all samples. This is often a very small number of genes so it is unlikely to affect your analysis either way.
+
+# Create Single-Cell
+```{r, collapse=TRUE}
+library(EnsDb.Hsapiens.v86)
+
+seRNA <- import10xFeatureMatrix(
+  input = rnaFiles,
+  names = names(rnaFiles),
+  strictMatch = TRUE,
+  features = genes(EnsDb.Hsapiens.v86)
+)
+```
+
+
+The next thing that we want to do is add this scRNA-seq data to our `ArchRProject` via the `addGeneExpressionMatrix()` function. However, there is some tidying up that we need to do before we are ready to do that. Inherent in how the multiomic data is generated, you will likely have cells that pass scRNA-seq quality control but not scATAC-seq quality control and vice versa. This can cause problems downstream with other ArchR functions that expect every cell to have every data type. For example, if you were to add gene expression data for only a subset of cells and then try to perform `addIterativeLSI()` on the corresponding `GeneExpressionMatrix`, ArchR would not know what to do with the cells that were missing data in the `GeneExpressionMatrix`. Because our `ArchRProject` is anchored in the scATAC-seq data, we first check to see how many cells in our project (the ones that have passed scATAC-seq quality control) are not also in our scRNA-seq data
+
+```{r, collapse=TRUE}
+length(which(getCellNames(projMulti1) %ni% colnames(seRNA)))
+```
+
+Though not many cells in this case, we need to remove these cells from our project before proceeding. We do this using the `subsetArchRProject()` function and saving this as a new `ArchRProject` called `projMulti2`. Again, this removal isn't explicitly necessary but there are downstream ArchR functions that could break if all cells dont have both data types so the safest thing to do is remove them.
+
+```{r, collapse=TRUE}
+cellsToKeep <- which(getCellNames(projMulti1) %in% colnames(seRNA))
+projMulti2 <- subsetArchRProject(ArchRProj = projMulti1, cells = getCellNames(projMulti1)[cellsToKeep], outputDirectory = "Save-ProjMulti2",force = TRUE)
+```
+
+
+Finally, we are ready to add the gene expression data to our project. You'll notice here another parameter called `strictMatch`. When `strictMatch = TRUE`, this will ensure that all cells in the `ArchRProject` are also represented in the `seRNA` object. This is a nice fail-safe to make sure that the above project subsetting went smoothly. If `strictMatch = FALSE` (the default), then this function will merely throw a warning telling you that not all of your cells have scRNA-seq information and that this could cause problems downstream.
+# Add Gene Expression
+```{r, collapse=TRUE}
+projMulti2 <- addGeneExpressionMatrix(input = projMulti2, seRNA = seRNA, strictMatch = TRUE, force = TRUE)
+```
+
+The last thing that we will would want to do during this project setup phase is filter out any doublets, However we are leaving most cells in this case.
+# Filter Doublets and Save
+```{r, collapse=TRUE}
+projMulti2 <- addDoubletScores(projMulti2, force = TRUE)
+#projMulti2 <- filterDoublets(projMulti2)
+saveArchRProject(projMulti2)
+```

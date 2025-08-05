@@ -1,0 +1,372 @@
+---
+title: "Fibrotic Memory of Fibroblasts Analysis"
+author: "Tawaun Lucas"
+date: "11/28/2023"
+output: 
+  html_document:
+  toc: true
+toc_float: true
+toc_collapsed: true
+toc_depth: 3
+number_sections: true
+theme: lumen
+---
+Data has been reprocessed to exclude those cells that did not have both ATAC and gene expression. This allows for better downstream analysis in ArchR.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message=FALSE, warning=FALSE,
+                      out.width = '150%',out.height = '150%')
+```
+
+# Setup Environment
+```{r Enviroment}
+#load the ArchR library
+library(ArchR)
+library(grid)
+library(gridExtra)
+library(dsassembly)
+#set a seed to facilitate replication of operations requiring randomization
+set.seed(824)
+
+#default number of Parallel threads is 16
+# working on a local computer, 1 thread works best
+addArchRThreads(14)
+
+#Before we begin, we need add a reference genome annotation for ArchR 
+#to have access to chromosome and gene information. ArchR supports hg19, hg38, mm9, and mm10.
+addArchRGenome("hg38")
+data.dir <- "/gstore/scratch/u/lucast3/fibroticmemory" # setdirectory for files 
+
+```
+
+# Load Project
+
+```{r Load Project}
+projMulti2 <- loadArchRProject(file.path(data.dir,"Save-ProjMulti2"),
+                        showLogo = FALSE)
+
+```
+
+# Analysis of multiome data in ArchR
+The primary difference between ATAC-only analysis and multiomic analysis is that we are using the `GeneExpressionMatrix` instead of the `GeneScoreMatrix`.
+
+The first thing we will do is perform dimensionality reduction  We can do this on the scATAC-seq data via the `TileMatrix` and on the scRNA-seq data via the `GeneExpressionMatrix`.
+## ATAC Dim Reduc
+```{r, collapse=TRUE}
+projMulti2 <- addIterativeLSI(
+  ArchRProj = projMulti2, 
+  clusterParams = list(
+    resolution = 0.2, 
+    sampleCells = 10000,
+    n.start = 10
+  ),
+  saveIterations = FALSE,
+  useMatrix = "TileMatrix", 
+  depthCol = "nFrags",
+  name = "LSI_ATAC"
+)
+```
+
+## RNA Dim Reduc
+```{r, collapse=TRUE}
+projMulti2 <- addIterativeLSI(
+  ArchRProj = projMulti2, 
+  clusterParams = list(
+    resolution = 0.2, 
+    sampleCells = 10000,
+    n.start = 10
+  ),
+  saveIterations = FALSE,
+  useMatrix = "GeneExpressionMatrix", 
+  depthCol = "Gex_nUMI",
+  varFeatures = 2500,
+  firstSelection = "variable",
+  binarize = FALSE,
+  name = "LSI_RNA"
+)
+```
+
+## Combined Dim Reduc
+
+We can also create a dimensionality reduction that uses information from both the scATAC-seq and scRNA-seq data. We will name this `reducedDims` object "LSI_Combined".
+
+```{r}
+projMulti2 <- addCombinedDims(projMulti2, reducedDims = c("LSI_ATAC", "LSI_RNA"), name =  "LSI_Combined",corCutOff = 0.75)
+```
+
+```{r}
+# Need to order colnames so that findclusters will run
+colnames(projMulti2@reducedDims$LSI_Combined$matRD)[1:28]<-1:28
+colnames(projMulti2@reducedDims$LSI_Combined$matRD)[29:58]<-1:30
+projMulti2@reducedDims$LSI_Combined$matRD <- projMulti2@reducedDims$LSI_Combined$matRD[,order(as.numeric(colnames(projMulti2@reducedDims$LSI_Combined$matRD)))]
+```
+
+We can create UMAP embeddings for each of these dimensionality reductions.
+### Adding UMAP
+```{r, collapse=TRUE}
+projMulti2 <- addUMAP(projMulti2, reducedDims = "LSI_ATAC", name = "UMAP_ATAC", minDist = 0.8, force = TRUE)
+projMulti2 <- addUMAP(projMulti2, reducedDims = "LSI_RNA", name = "UMAP_RNA", minDist = 0.8, force = TRUE)
+projMulti2 <- addUMAP(projMulti2, reducedDims = "LSI_Combined", name = "UMAP_Combined", minDist = 0.8, force = TRUE)
+```
+
+And then call clusters for each.
+### Adding Clusters
+```{r, collapse=TRUE}
+projMulti2 <- addClusters(projMulti2, reducedDims = "LSI_ATAC", name = "Clusters_ATAC", resolution = 0.4, force = TRUE)
+projMulti2 <- addClusters(projMulti2, reducedDims = "LSI_RNA", name = "Clusters_RNA", resolution = 0.4, force = TRUE)
+projMulti2 <- addClusters(projMulti2, reducedDims = "LSI_Combined", name = "Clusters_Combined", resolution = 0.4, force = TRUE)
+```
+
+We can plot how each of these dimensionality reductions look with respect to the clusters called in "LSI_Combined".
+### Plotting Clusters
+```{r, collapse=TRUE}
+p1 <- plotEmbedding(projMulti2, name = "Clusters_Combined", embedding = "UMAP_ATAC", size = 1, labelAsFactors=F, labelMeans=F)
+p2 <- plotEmbedding(projMulti2, name = "Clusters_Combined", embedding = "UMAP_RNA", size = 1, labelAsFactors=F, labelMeans=F)
+p3 <- plotEmbedding(projMulti2, name = "Clusters_Combined", embedding = "UMAP_Combined", size = 1, labelAsFactors=F, labelMeans=F)
+
+p <- lapply(list(p1,p2,p3), function(x){
+  x + guides(color = "none", fill = "none") + 
+    theme_ArchR(baseSize = 6.5) +
+    theme(plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), "cm")) +
+    theme(
+      axis.text.x=element_blank(), 
+      axis.ticks.x=element_blank(), 
+      axis.text.y=element_blank(), 
+      axis.ticks.y=element_blank()
+    )
+})
+
+do.call(cowplot::plot_grid, c(list(ncol = 3),p))
+```
+
+We can also save this to a PDF file.
+### Save Plots
+```{r, collapse=TRUE}
+plotPDF(p1, p2, p3, name = "UMAP-scATAC-scRNA-Combined", addDOC = FALSE)
+```
+
+You'll notice that there are some differences between the cluster residence of cells in the scATAC-seq space and cells in the scRNA-seq space. We can visualize these differences using a confusion matrix.
+
+## Confusion Matrix
+```{r, collapse=TRUE}
+cM_atac_rna <- confusionMatrix(paste0(projMulti2$Clusters_ATAC), paste0(projMulti2$Clusters_RNA))
+cM_atac_rna <- cM_atac_rna / Matrix::rowSums(cM_atac_rna)
+
+library(pheatmap)
+p_atac_rna <- pheatmap::pheatmap(
+  mat = as.matrix(cM_atac_rna), 
+  color = paletteContinuous("whiteBlue"), 
+  border_color = "black"
+)
+plotPDF(p_atac_rna,name = "ConfusionMatrix-scATAC-scRNA", addDOC = FALSE)
+p_atac_rna
+```
+
+# Peak 2 Gene Links
+
+```{r, collapse=TRUE}
+require(BSgenome.Hsapiens.UCSC.hg38)
+projMulti2 <- addGroupCoverages(ArchRProj = projMulti2, groupBy = "Clusters_Combined",force = TRUE)
+
+projMulti2 <- addReproduciblePeakSet(
+  ArchRProj = projMulti2, groupBy = "Clusters_Combined",
+  pathToMacs2 = "/gstore/home/lucast3/.conda/envs/MACS/bin/macs2",
+  force = TRUE)
+
+projMulti2 <- addPeakMatrix(ArchRProj = projMulti2,force = TRUE)
+projMulti2 <- addPeak2GeneLinks(
+  ArchRProj = projMulti2, 
+  reducedDims = "LSI_Combined",
+  useMatrix = "GeneExpressionMatrix")
+
+# examine merged peak set.
+getPeakSet(projMulti2)
+
+p2g <- getPeak2GeneLinks(ArchRProj = projMulti2)
+
+#examine links
+p2g[[1]]
+```
+
+There are, of course, some aspects of the analysis which you should tweak when using multiome data. One such example is the `bias` argument to `getMarkerFeatures()` which can be tweaked to account for both scATAC-seq data quality (`"TSSEnrichment`) and read depth for both assays (`"log10(nFrags)"` for scATAC-seq and `"log10(Gex_nUMI)"` for scRNA-seq).
+# Marker Analysis
+## Combined Clusters
+```{r, collapse=TRUE}
+se <- getMarkerFeatures(
+  ArchRProj = projMulti2,
+  groupBy = "Clusters_Combined",
+  bias = c("TSSEnrichment", "log10(nFrags)", "log10(Gex_nUMI)"))
+
+heatmap_gex <- plotMarkerHeatmap(
+  seMarker = se, 
+  cutOff = "FDR <= 0.01 & Log2FC >= 1.5",
+  nLabel = 4,
+  transpose = TRUE
+)
+
+plotPDF(draw(heatmap_gex, heatmap_legend_side = "bot", annotation_legend_side = "bot"),
+        name="Heatmap-ClusterMarkers",addDOC = FALSE)
+
+draw(heatmap_gex, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+
+#We can get a list of DataFrame objects, one for each of our clusters, 
+#containing the relevant marker features using the getMarkers() function.
+markerList <- getMarkers(se, cutOff = "FDR <= 0.01 & Log2FC >= 1.5")
+
+#save the marker genes object by cluster
+saveRDS(se, file = paste0("/gstore/scratch/u/lucast3/fibroticmemory/Save-ProjMulti2/", "markers_Cluster.rds"))
+```
+
+Lets add in metadata for groups
+
+## Group Markers
+```{r}
+group <- factor(projMulti2$Sample)
+treatment <- factor(projMulti2$Sample)
+levels(group) <- c(rep("Normal",4),rep("IPF",4))
+levels(treatment) <- c("Normal-NoTreatment","Normal-OSM","Normal-TGF",
+                       "Normal-IL13","IPF-NoTreatment","IPF-OSM",
+                       "IPF-TGF","IPF-IL13")
+
+projMulti2$Group <- as.character(group)
+projMulti2$Treatment <- as.character(treatment)
+
+markersGS <- getMarkerFeatures(
+  ArchRProj = projMulti2, 
+  groupBy = "Group",
+  bias = c("TSSEnrichment", "log10(nFrags)", "log10(Gex_nUMI)"),
+  testMethod = "wilcoxon"
+)
+
+heatmap_gex <- plotMarkerHeatmap(
+  seMarker = markersGS, 
+  cutOff = "FDR <= 0.01 & Log2FC >= 1.5",
+  nLabel = 4,plotLog2FC = TRUE,
+  transpose = TRUE
+)
+
+plotPDF(draw(heatmap_gex, heatmap_legend_side = "bot", annotation_legend_side = "bot"),
+        name="HeatmapGroupmarkers",addDOC = FALSE)
+draw(heatmap_gex, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+
+
+#save the marker genes object by samples
+saveRDS(markersGS, file = paste0("/gstore/scratch/u/lucast3/fibroticmemory/Save-ProjMulti2/", "markers_Group.rds"))
+```
+## Treatment Markers
+
+
+```{r}
+markersGS <- getMarkerFeatures(
+  ArchRProj = projMulti2, 
+  groupBy = "Treatment",
+  bias = c("TSSEnrichment", "log10(nFrags)", "log10(Gex_nUMI)"),
+  testMethod = "wilcoxon"
+)
+
+heatmap_gex <- plotMarkerHeatmap(
+  seMarker = markersGS, 
+  cutOff = "FDR <= 0.01 & Log2FC >= 1",
+  nLabel = 4,plotLog2FC = TRUE,
+  transpose = TRUE
+)
+
+plotPDF(draw(heatmap_gex, heatmap_legend_side = "bot", annotation_legend_side = "bot"),
+        name="HeatmapTreamentMarkers",addDOC=FALSE)
+
+draw(heatmap_gex, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+
+#save the marker genes object by samples
+saveRDS(markersGS, file = paste0("/gstore/scratch/u/lucast3/fibroticmemory/Save-ProjMulti2/", "markers_Treatment.rds"))
+```
+
+
+# Marker peaks (ie. Differential Peaks)
+
+Which peaks are unique to an individual cluster or a small group of clusters, in this case we are focused on sample. These can be very useful in understanding sample/cluster specific biology. 
+
+```{r}
+projMulti2 <- addPeakMatrix(projMulti2,force=TRUE)
+getAvailableMatrices(projMulti2)
+markersPeaks <- getMarkerFeatures(
+  ArchRProj = projMulti2, 
+  useMatrix = "PeakMatrix", 
+  groupBy = "Clusters_Combined",
+  bias = c("TSSEnrichment", "log10(nFrags)","log10(Gex_nUMI)"),
+  testMethod = "wilcoxon"
+)
+
+#DE Peaks by Sample
+markerList <- getMarkers(markersPeaks, cutOff = "FDR <= 0.01 & Log2FC >= 1")
+saveRDS(markerList, file = paste0("/gstore/scratch/u/lucast3/fibroticmemory/Save-ProjMulti2/", "markerPeaks.rds"))
+```
+
+```{r}
+#visualizing marker peaks as a heatmap
+heatmapPeaks <- plotMarkerHeatmap(
+  seMarker = markersPeaks, 
+  cutOff = "FDR <= 0.001 & Log2FC >= 3",
+  transpose = TRUE
+)
+draw(heatmapPeaks, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+plotPDF(heatmapPeaks, name = "Peak-Marker-Heatmap", width = 8, height = 6, ArchRProj = projMulti2, addDOC = FALSE)
+```
+
+
+# Motif Enrichment
+
+We will perform motif enrichment on our marker peaks to predict what transcription factors may be mediating the binding events that create those accessible chromatin sites.
+
+```{r}
+##need to install chromVARmotifs
+## devtools::install_github("GreenleafLab/chromVARmotifs")
+library(chromVARmotifs)
+require(BSgenome.Hsapiens.UCSC.hg38)
+projMulti2 <- addMotifAnnotations(ArchRProj = projMulti2, motifSet = "cisbp", name = "Motif",force=TRUE,species = )
+
+enrichMotifs <- peakAnnoEnrichment(
+  seMarker = markersPeaks,
+  ArchRProj = projMulti2,
+  peakAnnotation = "Motif",
+  cutOff = "FDR <= 0.01 & Log2FC >= 1"
+)
+
+#visualize using heatmap
+heatmapEM <- plotEnrichHeatmap(enrichMotifs, n = 7, transpose = TRUE)
+ComplexHeatmap::draw(heatmapEM, heatmap_legend_side = "bot", annotation_legend_side = "bot")
+
+plotPDF(heatmapEM, name = "Motifs-Enriched-Marker-Heatmap", width = 8, height = 6, ArchRProj = projMulti2, addDOC = FALSE)
+
+```
+
+## ChromVar deviations 
+
+chromVAR is designed for predicting enrichment of TF activity on a per-cell basis from sparse chromatin accessibility data. The two primary outputs of chromVAR are:
+  
+  1.  "deviations" - A deviation is a bias-corrected measurement of how far the per-cell accessibility of a given feature (i.e motif) deviates from the expected accessibility based on the average of all cells or samples.
+2.  "z-score" - The z-score, also known as a "deviation score" is the z-score for each bias-corrected deviation across all cells. The absolute value of the deviation score is correlated with the per-cell read depth. This is because, with more reads, you have higher confidence that the difference in per-cell accessibility of the given feature (i.e. motif) from the expectation is greater than would occur by chance.
+
+```{r}
+projMulti2 <- addBgdPeaks(projMulti2,force=TRUE)
+
+projMulti2 <- addDeviationsMatrix(
+  ArchRProj = projMulti2, 
+  peakAnnotation = "Motif",
+  force = TRUE
+)
+
+plotVarDev <- getVarDeviations(projMulti2, name = "MotifMatrix", plot = TRUE)
+plotVarDev
+```
+
+
+# Final Save
+```{r}
+saveArchRProject(ArchRProj = projMulti2,  load = FALSE)
+```
+
+
+
+```{r}
+sessionInfo()
+```
