@@ -1,10 +1,10 @@
 # Fibrotic Memory of Fibroblasts: Single-Cell Multiome Analysis
 
-## Overview
+## 🌍 Overview
 
 This repository contains scripts for analyzing single-cell ATAC-seq and RNA-seq multiome data from human lung fibroblasts to investigate fibrotic memory mechanisms. The analysis compares normal and IPF (Idiopathic Pulmonary Fibrosis) fibroblasts under different treatment conditions (No Treatment, OSM, TGF-β, IL-13) to understand epigenetic priming and transcriptional responses.
 
-## Project Structure
+## 📂 Project Structure
 
 ```         
 AnalysisScripts/
@@ -18,7 +18,7 @@ AnalysisScripts/
 └── README.md                 # This file
 ```
 
-## Environment Setup
+## 💻  Environment Setup
 
 ### Required R Packages
 
@@ -90,7 +90,7 @@ library(Signac)
     addArchRGenome("hg38")  # Downloads automatically
     ```
 
-## Input Data
+## 🧱 Input Data
 
 The analysis expects **Cell Ranger ARC** output containing:
 
@@ -169,7 +169,7 @@ IPF fibroblasts: 4 samples (No Treatment, OSM, TGF-β, IL-13)
 
 #### Panel 2: Priming Signature Analysis
 
-#### **Gene Modules**: 
+#### **Gene Modules**:
 
 **Transcription Factors**: FOXC2, FOXP1, CEBPB, STAT3, etc. -
 
@@ -197,14 +197,14 @@ IPF fibroblasts: 4 samples (No Treatment, OSM, TGF-β, IL-13)
 -   Comparison with IPF responses
 -   TF priming index calculation
 
-## Citation
+## 💭 Citation
 
 If you use this analysis pipeline, please cite: - ArchR: Greenleaf et al. (Nature Genetics, 2021) - Additional methods as appropriate for your publication
 
-## Contact
+## 📞 Contact
 
 For questions about this analysis pipeline, please contact:
 
-Data, Analyis, interpretation: Rakshin Kharwadkar [kharwadr\@gene.com](mailto:kharwadr@gene.com){.email} (First author)
+Data, Analyis, interpretation: Rakshin Kharwadkar [kharwadr\@gene.com](mailto:kharwadr@gene.com) (First author)
 
 Code: Tawaun Lucas (Bioinformatics support)
