@@ -5,7 +5,7 @@ library(Seurat)
 library(Signac)
 
 plot.dir <- "/gstore/data/project/fibro_multiome/Fig3plots"
-archr_proj <- loadarchr_proj("/gstore/project/fibro_multiome/Save-ProjMulti2")
+archr_proj <- loadArchRProject("/gstore/project/fibro_multiome/Save-ProjMulti2")
 addArchRGenome("hg38")
 group <- factor(archr_proj$Sample)
 treatment <- factor(archr_proj$Sample)
@@ -41,23 +41,23 @@ priming_genes <- list(
   ## Transcription factors (priming regulators)
   TFs=c("FOXC2", "FOXP1", "FOXP2", "FOXA1", "FOXA2", "CEBPB", "CEBPD", "STAT3",
         "IRF1", "ATF3", "JUN", "FOS", "SMAD3", "SMAD2", "RELA", "KLF6", "NR3C1"),
-  
+
   ## Canonical profibrotic effectors
   PFE=c("TGFB1", "TGFBR1", "TGFBR2", "IL6", "IL6ST", "IL13RA1", "PDGFRA", "PDGFRB",
         "FN1", "COL1A1", "COL3A1", "COL5A1", "COL6A1", "POSTN", "SPARC", "THBS1"),
-  
+
   ## Fibroblast contractility and survival
   FCS=c("ACTA2", "TAGLN", "ITGA5", "ITGB1", "CD44", "CDH11", "MMP2", "MMP9", "TIMP1"),
-  
+
   ## Senescence / stress response
   SSE=c("CDKN1A", "GDF15", "SERPINE1", "SOD2", "HMOX1", "PLK2", "IGFBP3"),
-  
+
   ## EMT and matrix remodeling
   Matrix=c("ZEB1", "ZEB2", "TWIST1", "VIM", "SNAI1", "SNAI2", "LOX", "LOXL2"),
-  
+
   ## Proinflammatory cytokines & chemokines
   CYT=c("CXCL12", "CCL2", "CCL7", "CXCL1", "IL1B", "TNFAIP3"),
-  
+
   ## Chromatin remodelers & pioneer activity
   Chrom=c("HMGA1", "HMGA2", "EZH2", "BRD4", "KDM6B")
 )
@@ -165,26 +165,26 @@ tf_markers <- markersTFs[rownames(markersTFs) %in% tf_names,]
 marker_list <- getMarkers(tf_markers)  # no filter yet
 ## Profibrotic TFs--------
 profibrotic_TFs <- c(
-  
+
   ## TGFβ/SMAD axis
   "SMAD2", "SMAD3", "SMAD4", "RUNX1", "RUNX2",
-  
+
   ## JAK/STAT and cytokine-responsive TFs
   "STAT1", "STAT3", "STAT5A", "STAT6",
   "IRF1", "IRF5", "IRF7",
-  
+
   ## AP-1 complex and stress response
   "JUN", "JUNB", "FOS", "FOSB", "ATF3", "BATF", "MAF",
-  
+
   ## EMT, ECM remodeling, mesenchymal transition
   "ZEB1", "ZEB2", "SNAI1", "SNAI2", "TWIST1", "TWIST2", "GLI1",
-  
+
   ## Senescence & inflammation
   "CEBPB", "CEBPD", "RELA", "RELB", "NFKB1", "NFKB2", "ETS2",
-  
+
   ## Fibroblast activation & matrix production
   "KLF4", "KLF6", "FOXC2", "FOXP1", "NFATC2", "MEF2A", "MEF2C",
-  
+
   ## Pro-survival and proliferation
   "MYC", "EGR1", "ELK1", "SP1", "YY1", "NR3C1", "BCL6"
 )
