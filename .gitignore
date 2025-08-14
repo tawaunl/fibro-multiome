@@ -39,3 +39,10 @@ fibroMultiome.Rproj
 #Figures and Plots
 *.pdf
 *.png
+
+# Data
+*.rds
+*.json
+
+# Logs
+*.log

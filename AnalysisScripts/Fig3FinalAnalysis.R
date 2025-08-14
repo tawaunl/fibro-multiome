@@ -21,20 +21,73 @@ archr_proj$Treatment <- as.character(treatment)
 # Panel 1: TF motif enrichment in IPF vs. normal HLFs ---------
 NoTreatment <- archr_proj[archr_proj$Treatment %in%  c("Normal-NoTreatment","IPF-NoTreatment"), ]
 
-NoTreatment <- addMotifAnnotations(ArchRProj = NoTreatment, motifSet = "cisbp", name = "Motif")
+## Load motifs ---------
+library(TFBSTools)
+library(universalmotif)
+
+# Read the MEME file
+motifs <- read_meme("/gstore/scratch/u/lucast3/fibroMultiome/jaspar_2024_clusters.meme")
+
+# Convert the motifs to a PWMMatrixList
+pwms <- list()
+for (i in c(1:length(motifs))) {
+  motif <- motifs[[i]]
+  pwm <- convert_motifs(motif, "TFBSTools-PWMatrix")
+  pwm_name <- gsub(":", "|", pwm@name)
+  pwms[[pwm_name]] <- pwm
+}
+
+# Convert the list to a PWMatrixList
+pwm_list <- do.call(PWMatrixList, pwms)
+
+# Add motif annotations
+NoTreatment <- addMotifAnnotations(
+  NoTreatment,
+  motifPWMs = pwm_list,
+  annoName = "jaspar_2024_clusters",
+  species = "Homo sapiens"
+)
+
 markersDA <- getMarkerFeatures(ArchRProj = NoTreatment, useMatrix = "PeakMatrix",
                                groupBy = "Group", testMethod = "wilcoxon",
                                bias = c("TSSEnrichment", "log10(nFrags)")) #A positive log2FC means the peak is more accessible in "IPF-NoTreatment"
 enrichedMotifs <- peakAnnoEnrichment(seMarker = markersDA, ArchRProj = NoTreatment,
-                                     peakAnnotation = "Motif",
-                                     cutOff = "FDR <= 0.05 & Log2FC >= 0.5")
-library(RColorBrewer)
+                                     peakAnnotation = "jaspar_2024_clusters",
+                                     cutOff = "FDR <= 0.1 & Log2FC >= 0")
 ## Heatmap of top motifs ---------
+library(ComplexHeatmap)
+library(circlize) # For color mapping
+library(SummarizedExperiment)
+enrichment_matrix <- assay(enrichedMotifs, "Enrichment")  # or "mlog10p", depending on what you used
+
+top_n <- 10
+top_motifs <- unique(c(
+  rownames(enrichment_matrix)[order(enrichment_matrix[, "IPF"], decreasing = TRUE)[1:top_n]],
+  rownames(enrichment_matrix)[order(enrichment_matrix[, "Normal"], decreasing = TRUE)[1:top_n]]
+))
+
+
+# Subset the matrix
+filtered_matrix <- enrichment_matrix[top_motifs, ]
+z <- Heatmap(
+  scale(filtered_matrix),
+  name = "Norm. Enrichment",
+  col = RColorBrewer::brewer.pal(n=7,"YlOrRd"),
+  cluster_rows = TRUE,
+  cluster_columns = FALSE,
+  show_row_names = TRUE,
+  show_column_names = TRUE,
+  row_names_gp = gpar(fontsize = 12),  # Adjusts y-axis (row) labels
+  column_names_gp = gpar(fontsize = 12),
+  heatmap_legend_param = list(direction = "horizontal")
+)
+draw(z, heatmap_legend_side = "bottom")
 heatmap_plot <- plotEnrichHeatmap(enrichedMotifs,
                                   n = 15,
-                                  pal =RColorBrewer::brewer.pal(n=7,"YlOrRd"))
+                                  pal =RColorBrewer::brewer.pal(n=7,"YlOrRd")
+                                  )
 
-draw(heatmap_plot, heatmap_legend_side = "bottom")
+draw(heatmap_plot, heatmap_legend_side = "bottom", )# Adjusts x-axis (column) labels)
 
 ## Priming Signature -------------
 priming_genes <- list(
@@ -58,39 +111,55 @@ priming_genes <- list(
   ## Proinflammatory cytokines & chemokines
   CYT=c("CXCL12", "CCL2", "CCL7", "CXCL1", "IL1B", "TNFAIP3"),
 
-  ## Chromatin remodelers & pioneer activity
-  Chrom=c("HMGA1", "HMGA2", "EZH2", "BRD4", "KDM6B")
+  ## Chromatin remodelers
+  Chrom=c("HMGA1", "HMGA2", "EZH2", "BRD4", "KDM6B"),
+  AP1= c("JUN", "JUNB", "JUND",
+    # FOS family
+    "FOS", "FOSB", "FOSL1", "FOSL2",
+    # ATF family
+    "ATF3", "ATF4", "ATF5", "BATF"
+  )
 )
 
 priming_genes[["all"]] <- as.vector(unlist(priming_genes))
-NoTreatment <- addModuleScore(
-  ArchRProj = NoTreatment,
-  useMatrix = "GeneExpressionMatrix",
-  name = "PrimingSignature",
-  features = priming_genes
-)
+
+
+for (module_name in names(priming_genes)) {
+  message("Scoring module: ", module_name)
+
+  NoTreatment <- addModuleScore(
+    ArchRProj = NoTreatment,
+    useMatrix = "GeneExpressionMatrix",
+    name = module_name,
+    features = list(priming_genes[[module_name]])
+  )
+}
 
 ### Plot Modules -----------------
-module_names <- c("PrimingSignature.TFs", "PrimingSignature.PFE", "PrimingSignature.FCS",
-                  "PrimingSignature.SSE", "PrimingSignature.Matrix", "PrimingSignature.CYT",
-                  "PrimingSignature.Chrom","PrimingSignature.all")
+library(tidyverse)
+
+module_names <- c("TFs1", "PFE1", "FCS1",
+                 "SSE1", "Matrix1", "CYT1",
+                 "Chrom1","AP11","all1")
 df <- getCellColData(NoTreatment, select = c("Sample","Group", module_names)) |>
   as.data.frame()
 avg <- df %>%
-  group_by(Sample, Group) %>%
+  dplyr::group_by(Sample, Group) %>%
   summarise(across(all_of(module_names), mean, na.rm = TRUE), .groups = "drop")
 
 df_long <- df %>% pivot_longer(cols = module_names, names_to = "Module", values_to = "Score")
 
+
 module_labels <- c(
-  PrimingSignature.TFs = "Priming TFs",
-  PrimingSignature.PFE = "Profibrotic Effectors",
-  PrimingSignature.FCS = "Fibroblast Contractility",
-  PrimingSignature.SSE = "Senescence/Stress",
-  PrimingSignature.Matrix = "EMT/Matrix Remodeling",
-  PrimingSignature.CYT = "Cytokines & Chemokines",
-  PrimingSignature.Chrom = "Chromatin Remodelers",
-  PrimingSignature.all = "All Priming Genes"
+  TFs1 = "Priming TFs",
+  PFE1 = "Profibrotic Effectors",
+  FCS1 = "Fibroblast Contractility",
+  SSE1 = "Senescence/Stress",
+  Matrix1 = "EMT/Matrix Remodeling",
+  CYT1 = "Cytokines & Chemokines",
+  Chrom1= "Chromatin Remodelers",
+  AP11 = "AP-1",
+  all1 = "All Priming Genes"
 )
 
 df_long$Module <- factor(df_long$Module, levels = module_names, labels = module_labels[module_names])
@@ -113,14 +182,13 @@ ggplot(df_long, aes(x = Group, y = Score, fill = Group)) +
 ## adding Deviation Scores
 NoTreatment <- addDeviationsMatrix(
   ArchRProj = NoTreatment,
-  peakAnnotation = "Motif",
-  name = "MotifMatrix"
+  peakAnnotation = "jaspar_2024_clusters"
 )
 
 TFs_of_interest <- c("CEBPA_155","CEBPB_140", "FOXP2_356", "FOXN3_829", "FOXN2_854",
                      "FOXL2_855","FOXD4_830",
                      "FOXJ1_853","FOXP3_348","FOXD4L3_832")
-TF_devs <- getMatrixFromProject(NoTreatment, useMatrix = "MotifMatrix")
+TF_devs <- getMatrixFromProject(NoTreatment, useMatrix = "jaspar_2024_clustersMatrix")
 
 TF_scores <- assay(TF_devs)[TFs_of_interest, ]
 colnames(TF_scores) <- colnames(NoTreatment)  # Match cell IDs
@@ -144,7 +212,6 @@ plotEmbedding(
   name = "PrimingComposite",
   embedding = "UMAP_Combined"
 )
-
 
 # Panel 3: Treatment-Induced Transcriptional Activation in IPF Fibroblasts --------
 
@@ -222,8 +289,8 @@ plotMarkerHeatmap(
 )
 
 ### Confirm TF Activity via chromVAR Deviation Scores -------
-deviationMat <- getMatrixFromProject(ipf, useMatrix = "MotifMatrix")
-motif_names <- rownames(getMatrixFromProject(ipf, useMatrix = "MotifMatrix"))
+deviationMat <- getMatrixFromProject(ipf, useMatrix = "jaspar_2024_clustersMatrix")
+motif_names <- rownames(getMatrixFromProject(ipf, useMatrix = "jaspar_2024_clustersMatrix"))
 matched_motifs <- motif_names[sapply(motif_names, function(motif) {
   any(startsWith(motif, top_TFs_fibrotic))
 })]
