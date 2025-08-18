@@ -331,7 +331,7 @@ meta$Cell <- rownames(meta)
 library(tidyverse)
 # Extract regulon scores from cellColData
 regulon_cols <- grep("^Regulon_", colnames(getCellColData(NoTreatment)), value = TRUE)
-regulon_scores <- getCellColData(NoTreatment, select = regulon_cols[52:length(regulon)]) |> as.data.frame()
+regulon_scores <- getCellColData(NoTreatment, select = regulon_cols[52:length(regulon_cols)]) |> as.data.frame()
 regulon_scores$Group <- meta[rownames(regulon_scores), group_col]
 
 # Average per group
